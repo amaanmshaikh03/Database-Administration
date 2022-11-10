@@ -1,0 +1,540 @@
+Group 3 – DBA625 - Assignment 1
+
+
+================================================================================================================================ 
+
+ONE:
+================================ 
+❓ a) Your Database should be down initially. Perform the Instance Startup by using your PFILE and move through all 3 stages (one after another and without shutdown).  AFTER each stage check TWO appropriate dynamic views, where first will show that you really are in that stage and second will show that you are not in the next stage (except when in OPEN stage, you should check only one view).
+******************************************************
+NOMOUNT:
+*********
+SQL> STARTUP PFILE=initstudent.ora NOMOUNT;
+ORACLE instance started.
+Total System Global Area 1258290752 bytes
+Fixed Size                  8896064 bytes
+Variable Size             369098752 bytes
+Database Buffers          872415232 bytes
+Redo Buffers                7880704 bytes
+
+SQL> SELECT instance_name, status FROM V$INSTANCE;
+INSTANCE_NAME    STATUS
+---------------- ------------
+student          STARTED
+
+SQL> SELECT * FROM V$TABLESPACE;
+SELECT * FROM V$TABLESPACE
+              *
+ERROR at line 1:
+ORA-01507: database not mounted
+
+MOUNT:
+*********
+SQL> ALTER DATABASE MOUNT;
+Database altered.
+
+SQL> SELECT name, open_mode FROM V$DATABASE;
+NAME      OPEN_MODE
+--------- --------------------
+STUDENT   MOUNTED
+
+SQL> desc dba_data_files;
+ERROR:
+ORA-01219: database or pluggable database not open: queries allowed on fixed
+tables or views only
+
+OPEN:
+*********
+SQL> ALTER database OPEN;
+Database altered.
+
+SQL> SELECT name, open_mode FROM V$DATABASE;
+NAME      OPEN_MODE
+--------- --------------------
+STUDENT   READ WRITE
+
+******************************************************
+
+
+❓ b) Show the full paths and names (just names) for all Control, Log and Data files by checking appropriate dynamic performance views. 
+******************************************************
+CONTROL:
+*********
+SQL> SELECT name FROM V$CONTROLFILE;
+NAME
+--------------------------------------------------------------------------------
+/opt/oracle/app/oracle/oradata/STUDENT/control01.ctl
+/opt/oracle/app/oracle/recovery_area/STUDENT/control02.ctl
+
+LOG:
+*********
+SQL> SELECT group#, member FROM v$LOGFILE;
+GROUP# MEMBER
+------ --------------------------------------------------
+     3 /opt/oracle/app/oracle/oradata/STUDENT/redo03.log
+     2 /opt/oracle/app/oracle/oradata/STUDENT/redo02.log
+     1 /opt/oracle/app/oracle/oradata/STUDENT/redo01.log
+
+DATAFILE:
+*********
+SQL> SELECT name FROM v$DATAFILE;
+NAME
+--------------------------------------------------------------------------------
+/opt/oracle/app/oracle/oradata/STUDENT/system01.dbf
+/opt/oracle/app/oracle/oradata/STUDENT/sysaux01.dbf
+/opt/oracle/app/oracle/oradata/STUDENT/undotbs01.dbf
+/opt/oracle/app/oracle/oradata/STUDENT/mine01.dbf
+/opt/oracle/app/oracle/oradata/STUDENT/users01.dbf
+
+******************************************************
+
+
+❓ c) Show values of all six important SGA parameters by using the “Quick” method three times (without specifying SELECT statement). 
+******************************************************
+
+SQL> show parameter target
+NAME                                 TYPE        VALUE
+------------------------------------ ----------- ------------------------------
+archive_lag_target                   integer     0
+db_big_table_cache_percent_target    string      0
+db_flashback_retention_target        integer     1440
+fast_start_io_target                 integer     0
+fast_start_mttr_target               integer     0
+memory_max_target                    big integer 0
+memory_target                        big integer 0
+parallel_servers_target              integer     32
+pga_aggregate_target                 big integer 200M
+sga_target                           big integer 1200M
+target_pdbs                          integer     0
+
+SQL> show parameter pool
+NAME                                 TYPE        VALUE
+------------------------------------ ----------- ------------------------------
+buffer_pool_keep                     string
+buffer_pool_recycle                  string
+java_pool_size                       big integer 64M
+large_pool_size                      big integer 32M
+memoptimize_pool_size                big integer 0
+olap_page_pool_size                  big integer 0
+shared_pool_reserved_size            big integer 13421772
+shared_pool_size                     big integer 256M
+streams_pool_size                    big integer 0
+
+SQL> show parameter db_cache
+NAME                                 TYPE        VALUE
+------------------------------------ ----------- ------------------------------
+db_cache_advice                      string      ON
+db_cache_size                        big integer 608M
+
+
+******************************************************
+
+❓ d) Then try to increase the value of your Large Pool promptly to 160M. What happened? Explain.
+******************************************************
+SQL> ALTER SYSTEM SET LARGE_POOL_SIZE=160m;
+System altered.
+
+Explain: The changes were made. Since this is a Dynamic parameter and there is enough memory, they got changed live.
+******************************************************
+
+
+❓ e) Now, try to increase the value of your Shared Pool promptly to 320M. What happened? Explain. 
+******************************************************
+SQL> ALTER SYSTEM SET SHARED_POOL_SIZE=320m;
+ALTER SYSTEM SET SHARED_POOL_SIZE=320m
+*
+ERROR at line 1:
+ORA-02097: parameter cannot be modified because specified value is invalid
+ORA-04033: Insufficient memory to grow pool
+
+Explain: Since we only have 1.2G of memory available as total_sga, and we just changed the value from large_pool_size to 160M, we do not currently have enough available memory to allocate shared_pool up to 320M or any other pool. We first need to deallocate memory from db_cache in order to have enough for the large_pool_size to be increased.
+******************************************************
+
+
+❓ f) Go to EM DB Express and find out what are the REAL values for your 5 memory regions
+******************************************************
+total_sga = 1200m
+shared_pool = 256m
+large_pool = 160m
+java_pool = 64m
+db_cache = 640m
+
+******************************************************
+
+❓ g) Deduct the minimal amount of memory from BUFFER CACHE, so that you can achieve the target of 320M for Shared Pool. Perform both tasks (decrease followed by increase).
+******************************************************
+SQL> ALTER SYSTEM SET DB_CACHE_SIZE=576m;
+System altered.
+
+SQL> ALTER SYSTEM SET SHARED_POOL_SIZE=320m SCOPE=MEMORY;
+System altered.
+******************************************************
+
+
+❓ h) Close your Database so that you wait for all transactions to finish. Then start it by using your PFILE again. What happened with changes for the Large and Shared Pool?
+******************************************************
+SQL> SHUTDOWN TRANSACTIONAL;
+Database closed.
+Database dismounted.
+ORACLE instance shut down.
+
+SQL> STARTUP PFILE=initstudent.ora;
+ORACLE instance started.
+Total System Global Area 1258290752 bytes
+Fixed Size                  8896064 bytes
+Variable Size             369098752 bytes
+Database Buffers          872415232 bytes
+Redo Buffers                7880704 bytes
+Database mounted.
+Database opened.
+
+SQL> SHOW PARAMETER POOL
+NAME                                 TYPE        VALUE
+------------------------------------ ----------- ------------------------------
+buffer_pool_keep                     string
+buffer_pool_recycle                  string
+java_pool_size                       big integer 64M
+large_pool_size                      big integer 32M
+memoptimize_pool_size                big integer 0
+olap_page_pool_size                  big integer 0
+shared_pool_reserved_size            big integer 13421772
+shared_pool_size                     big integer 256M
+streams_pool_size                    big integer 0
+
+Explain: Large and Shared Pool revert back to values set in PFILE since we only changed the values at the current instance, and Pfile does not maintain the values throughout Startups/Shutdowns that were changed in memory.
+******************************************************
+
+
+❓ i) Now display last 30 lines from your “Database Journal”
+******************************************************
+[oracle@oracledb19c pfile]$ cd /opt/oracle/app/oracle/diag/rdbms/student/student/trace
+[oracle@oracledb19c trace]$ tail -30 alert_student.log
+28621543,28642469,28699321,28710663,28755846,28772816,28785321,28800508,
+28808652,28815557,28847541,28847572,28870496,28871040,28874416,28877252,
+28881191,28881848,28888083,28911140,28925250,28925460,28935956,28940472,
+28942694,28951332,28963036,28968779,28980448,28995287,29003207,29003617,
+29016294,29018680,29024876,29026154,29027933,29047127,29052850,29058476,
+29111631,29112455,29117337,29123444,29125708,29125786,29129476,29131772,
+29132456,29139727,29146157,29147849,29149170,29152603,29152752,29154631,
+29154636,29154829,29159216,29159661,29160462,29161923,29169540,29169739,
+29170717,29173618,29181568,29182920,29183298,29186091,29191827,29201143,
+29201695,29209545,29210577,29210610,29210624,29210683,29213641,29219627,
+29224294,29225861,29229839,29235934,29242906,29243749,29244495,29244766,
+29244968,29248723,29249583,29251564,29255616,29260224,29261695,29271019,
+29273360,29282090,29282666,29285453,29285621,29290235,29292232,29293806,
+29294753,29299830,29307090,29307109,29311336,29329675,29330791,29339299,
+29357821,29360467,29360775,29367971,29368725,29379299,29379381,29380527,
+29381000,29382296,29391301,29393649,29402110,29411931,29413360,29457319,
+29465047
+===========================================================
+2022-02-24T14:56:14.772489-05:00
+db_recovery_file_dest_size of 4096 MB is 0.00% used. This is a
+user-specified limit on the amount of space that will be used by this
+database for recovery-related files, and does not reflect the amount of
+space available in the underlying filesystem or ASM diskgroup.
+2022-02-24T14:56:21.093191-05:00
+
+XDB installed.
+
+XDB initialized.
+
+XDB initialized.
+
+******************************************************
+
+
+TWO:
+================================ 
+❓ a) Create a new Tablespace called BLUE with an initial size of 10M and that all extents are   automatically sized and allocated by Server. Datafile blue01.dbf should go to DISK4 folder. 
+******************************************************
+SQL> CREATE TABLESPACE BLUE DATAFILE '/opt/oracle/app/oracle/oradata/DISK4/blue01.dbf' SIZE 10m;
+Tablespace created.
+******************************************************
+
+
+❓ b) Create a new Tablespace called RED with an initial size of 5M with all extents of equal size 200K.  Datafile red01.dbf should go to DISK2 folder and should have auto-extend option turned on with all new extents of 128K in size and with the limit of 10M. 
+******************************************************
+SQL> CREATE TABLESPACE RED DATAFILE '/opt/oracle/app/oracle/oradata/DISK2/red01.dbf' SIZE 5m AUTOEXTEND ON NEXT 128k MAXSIZE 10m UNIFORM SIZE 200k;
+Tablespace created.
+******************************************************
+
+
+❓ c) Add a second datafile to Tablespace RED with an initial size of  3M.
+   Datafile red02.dbf should go to DISK3 folder and try to make this file with all extents   uniformed in size of  80K. 
+   Explain why that was not successful? Then just add this file without that option. 
+******************************************************
+SQL> ALTER TABLESPACE RED ADD DATAFILE '/opt/oracle/app/oracle/oradata/DISK3/red02.dbf' SIZE 3m UNIFORM SIZE 80k;
+ALTER TABLESPACE RED ADD DATAFILE '/opt/oracle/app/oracle/oradata/DISK3/red02.dbf' SIZE 3m UNIFORM SIZE 80k
+                                                                                           *
+ERROR at line 1:
+ORA-00933: SQL command not properly ended
+
+Explain: Since the tablespace sets the uniform size, we cannot set it in the datafile.
+
+
+SQL> ALTER TABLESPACE RED ADD DATAFILE '/opt/oracle/app/oracle/oradata/DISK3/red02.dbf' SIZE 3m;
+Tablespace altered.
+******************************************************
+
+
+❓ d) Use DBA_TABLESPACES view to display all tablespace names, their available status, can they store data or not, management mode, how the size of the extents is managed, their actual size, but only for freshly created tablespaces and 'USERS'. 
+******************************************************
+SQL> SELECT tablespace_name, status, contents, extent_management, allocation_type, initial_extent
+  2  FROM dba_tablespaces
+  3  WHERE tablespace_name IN ('BLUE','RED','USERS');
+
+
+TABLESP STATUS    CONTENTS        EXTENT_MAN ALLOCATIO INITIAL_EXTENT
+------- --------- --------------- ---------- --------- --------------
+BLUE    ONLINE    PERMANENT       LOCAL      SYSTEM     65536
+RED     ONLINE    PERMANENT       LOCAL      UNIFORM   204800
+USERS   ONLINE    PERMANENT       LOCAL      SYSTEM     65536
+
+******************************************************
+
+
+❓ e) Use DBA_DATA_FILES view to display file numbers, their names, tablespace names they belong to, current size (in blocks only) and their auto-extend  information (with 3 components), but only for freshly created files and file from the 'USERS' tablespace. 
+******************************************************
+SQL> SELECT file_id, file_name, tablespace_name, blocks, autoextensible, increment_by, maxbytes
+  2  FROM dba_data_files
+  3  WHERE tablespace_name IN ('BLUE','RED','USERS');
+
+   FILE_ID
+----------
+FILE_NAME
+------------------------------------------------------------------------------------------------------------------------
+TABLESPACE_NAME                    BLOCKS AUT INCREMENT_BY   MAXBYTES
+------------------------------ ---------- --- ------------ ----------
+         7
+/opt/oracle/app/oracle/oradata/STUDENT/users01.dbf
+USERS                                 640 YES          160 3.4360E+10
+
+         9
+/opt/oracle/app/oracle/oradata/DISK4/blue01.dbf
+BLUE                                 1280 NO             0          0
+
+        10
+/opt/oracle/app/oracle/oradata/DISK2/red01.dbf
+RED                                   640 YES           16   10485760
+
+        11
+/opt/oracle/app/oracle/oradata/DISK3/red02.dbf
+RED                                   384 NO             0          0
+******************************************************
+
+❓ f) Resize the second datafile in Tablespace RED to 2M and make it auto-extendable with extent size of  80K  and with the limit of 6M.
+******************************************************
+SQL> ALTER DATABASE DATAFILE '/opt/oracle/app/oracle/oradata/DISK3/red02.dbf' RESIZE 2m;
+Database altered.
+
+SQL> ALTER DATABASE DATAFILE '/opt/oracle/app/oracle/oradata/DISK3/red02.dbf' AUTOEXTEND ON NEXT 80k MAXSIZE 6m;
+Database altered.
+******************************************************
+
+
+❓ g) Try to make the file in Tablespace BLUE auto-extendable with the extent size 2 times greater than it was the case with the original extent. 
+Do not specify the limit. Was it successful? 
+What will be the limit value in this case - check the appropriate view and show only that column for Tablespace BLUE.
+******************************************************
+SQL> ALTER DATABASE DATAFILE '/opt/oracle/app/oracle/oradata/DISK4/blue01.dbf' AUTOEXTEND ON NEXT 128k;
+Database altered.
+
+SQL> SELECT maxbytes
+  2  FROM dba_data_files
+  3  WHERE tablespace_name='BLUE';
+
+  MAXBYTES
+----------
+3.4360E+10
+******************************************************
+
+
+❓ h) Try to limit auto-extension from the previous question to 20M without specifying the NEXT extent value. Was it successful? 
+What is now value of  that (NEXT) parameter -- check the appropriate view and show only that column for Tablespace BLUE. 
+******************************************************
+SQL> ALTER DATABASE DATAFILE '/opt/oracle/app/oracle/oradata/DISK4/blue01.dbf' AUTOEXTEND ON MAXSIZE 20m;
+Database altered.
+
+SQL> SELECT increment_by
+  2  FROM dba_data_files
+  3  WHERE tablespace_name='BLUE';
+INCREMENT_BY
+------------
+          16
+******************************************************
+
+
+❓ i) Move datafile red02.dbf to the DISK4 folder by using the appropriate scenario steps (when dealing with non-critical datafiles).
+******************************************************
+SQL> ALTER TABLESPACE RED OFFLINE;
+Tablespace altered.
+
+SQL> host
+[oracle@oracledb19c oradata]$ mv DISK3/red02.dbf DISK4/
+[oracle@oracledb19c DISK4]$ exit
+exit
+
+SQL> ALTER TABLESPACE RED RENAME DATAFILE '/opt/oracle/app/oracle/oradata/DISK3/red02.dbf' TO '/opt/oracle/app/oracle/oradata/DISK4/red02.dbf';
+Tablespace altered.
+
+SQL> ALTER TABLESPACE RED ONLINE;
+Tablespace altered.
+******************************************************
+
+
+❓ j) Repeat step e)
+******************************************************
+SQL> SELECT file_id, file_name, tablespace_name, blocks, autoextensible, increment_by, maxbytes
+  2  FROM dba_data_files
+  3  WHERE tablespace_name IN ('BLUE','RED','USERS');
+   FILE_ID
+----------
+FILE_NAME
+------------------------------------------------------------------------------------------------------------------------
+TABLESPACE_NAME                    BLOCKS AUT INCREMENT_BY   MAXBYTES
+------------------------------ ---------- --- ------------ ----------
+         7
+/opt/oracle/app/oracle/oradata/STUDENT/users01.dbf
+USERS                                 640 YES          160 3.4360E+10
+         9
+/opt/oracle/app/oracle/oradata/DISK4/blue01.dbf
+BLUE                                 1280 YES           16   20971520
+        10
+/opt/oracle/app/oracle/oradata/DISK2/red01.dbf
+RED                                   640 YES           16   10485760
+        11
+/opt/oracle/app/oracle/oradata/DISK4/red02.dbf
+RED                                   256 YES           10    6291456
+******************************************************
+
+
+THREE:
+================================ 
+❓ a)  Create a fourth and fifth Log Group and place them in the same directory where the existing log groups are already. Size for both new groups should be 50M each.
+******************************************************
+SQL> ALTER DATABASE ADD LOGFILE '/opt/oracle/app/oracle/oradata/STUDENT/redo04.log' SIZE 50m;
+Database altered.
+
+SQL> ALTER DATABASE ADD LOGFILE '/opt/oracle/app/oracle/oradata/STUDENT/redo005.log' SIZE 50m;
+Database altered.
+******************************************************
+
+❓ b)  Create a second Log Member for each Log File (5 of them) in a subdirectory  DISK3.
+******************************************************
+SQL> ALTER DATABASE ADD LOGFILE MEMBER '/opt/oracle/app/oracle/oradata/DISK3/redo01b.log' TO GROUP 1;
+Database altered.
+
+SQL> ALTER DATABASE ADD LOGFILE MEMBER '/opt/oracle/app/oracle/oradata/DISK3/redo02b.log' TO GROUP 2;
+Database altered.
+
+SQL> ALTER DATABASE ADD LOGFILE MEMBER '/opt/oracle/app/oracle/oradata/DISK3/redo03b.log' TO GROUP 3;
+Database altered.
+
+SQL> ALTER DATABASE ADD LOGFILE MEMBER '/opt/oracle/app/oracle/oradata/DISK3/redo04b.log' TO GROUP 4;
+Database altered.
+
+SQL> ALTER DATABASE ADD LOGFILE MEMBER '/opt/oracle/app/oracle/oradata/DISK3/redo05b.log' TO GROUP 5;
+Database altered.
+******************************************************
+
+
+❓ c)  Show the full paths and names for all Log Files by using an appropriate dynamic performance view. 
+******************************************************
+SQL> SELECT member FROM v$LOGFILE;
+MEMBER
+------------------------------------------------------------------------------------------------------------------------
+/opt/oracle/app/oracle/oradata/STUDENT/redo03.log
+/opt/oracle/app/oracle/oradata/STUDENT/redo02.log
+/opt/oracle/app/oracle/oradata/STUDENT/redo01.log
+/opt/oracle/app/oracle/oradata/STUDENT/redo04.log
+/opt/oracle/app/oracle/oradata/STUDENT/redo005.log
+/opt/oracle/app/oracle/oradata/DISK3/redo01b.log
+/opt/oracle/app/oracle/oradata/DISK3/redo02b.log
+/opt/oracle/app/oracle/oradata/DISK3/redo03b.log
+/opt/oracle/app/oracle/oradata/DISK3/redo04b.log
+/opt/oracle/app/oracle/oradata/DISK3/redo05b.log
+******************************************************
+
+
+❓ d) Show Log Sequence Number, First System Change Number and Status for all Log files by using an appropriate dynamic performance view.
+******************************************************
+SQL> SELECT sequence#, first_change#, status
+  2  FROM v$LOG;
+ SEQUENCE# FIRST_CHANGE# STATUS
+---------- ------------- ----------------
+        10       2256584 INACTIVE
+        12       2258227 CURRENT
+         9       2256456 INACTIVE
+         0             0 UNUSED
+         0             0 UNUSED
+******************************************************
+
+
+❓ e) Relocate (move) just the second member of the fourth group to subdirectory DISK4.
+******************************************************
+SQL> host
+[oracle@oracledb19c oradata]$ mv DISK3/redo04b.log DISK4/
+[oracle@oracledb19c oradata]$ exit
+exit
+
+SQL> ALTER DATABASE RENAME FILE '/opt/oracle/app/oracle/oradata/DISK3/redo04b.log' TO '/opt/oracle/app/oracle/oradata/DISK4/redo04b.log';
+Database altered.
+******************************************************
+
+
+❓ f)  Drop the fifth group completely. Then repeat step c)
+******************************************************
+SQL> ALTER DATABASE DROP LOGFILE MEMBER '/opt/oracle/app/oracle/oradata/DISK3/redo05b.log';
+Database altered.
+
+SQL> ALTER DATABASE DROP LOGFILE GROUP 5;
+Database altered.
+
+SQL> SELECT member FROM v$LOGFILE;
+MEMBER
+------------------------------------------------------------------------------------------------------------------------
+/opt/oracle/app/oracle/oradata/STUDENT/redo03.log
+/opt/oracle/app/oracle/oradata/STUDENT/redo02.log
+/opt/oracle/app/oracle/oradata/STUDENT/redo01.log
+/opt/oracle/app/oracle/oradata/STUDENT/redo04.log
+/opt/oracle/app/oracle/oradata/DISK3/redo01b.log
+/opt/oracle/app/oracle/oradata/DISK3/redo02b.log
+/opt/oracle/app/oracle/oradata/DISK3/redo03b.log
+/opt/oracle/app/oracle/oradata/DISK4/redo04b.log
+******************************************************
+
+
+❓ g)  Perform two manual log switches. Then repeat step d)
+******************************************************
+SQL> ALTER SYSTEM SWITCH LOGFILE;
+System altered.
+
+SQL> ALTER SYSTEM SWITCH LOGFILE;
+System altered.
+
+SQL> SELECT sequence#, first_change#, status
+  2  FROM v$LOG;
+ SEQUENCE# FIRST_CHANGE# STATUS
+---------- ------------- ----------------
+        10       2256584 INACTIVE
+        12       2258227 ACTIVE
+        14       2339265 CURRENT
+        13       2339257 ACTIVE
+******************************************************
+
+
+❓ h) Check the status of all Log Files, and if there is one or more ACTIVE ones, then perform manual command, so that all these active files become inactive. Then repeat step d)
+******************************************************
+SQL> ALTER SYSTEM CHECKPOINT;
+System altered.
+
+SQL> SELECT sequence#, first_change#, status
+  2  FROM v$LOG;
+
+ SEQUENCE# FIRST_CHANGE# STATUS
+---------- ------------- ----------------
+        10       2256584 INACTIVE
+        12       2258227 INACTIVE
+        14       2339265 CURRENT
+        13       2339257 INACTIVE
+******************************************************
