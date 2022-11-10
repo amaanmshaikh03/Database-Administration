@@ -1,0 +1,891 @@
+Group 3 – DBA625 - Assignment 2
+
+
+================================================================================================================================ 
+
+PART #1
+=======================================
+
+a) Create new user called PAUL and assign BLUE and TEMP tablespaces to him, also DEFAULT profile. He should be allowed to use only 4M of BLUE tablespace, and also 2M of  INDX tablespace.
+-------------------------------------
+SQL> CREATE USER PAUL IDENTIFIED BY PAUL
+  2  DEFAULT TABLESPACE BLUE
+  3  TEMPORARY TABLESPACE TEMP;
+User created.
+
+SQL> ALTER USER PAUL QUOTA 4M on BLUE;
+User altered.
+
+SQL> ALTER USER PAUL QUOTA 2M on INDX;
+User altered.
+
+
+
+b) Create another user called KATE and assign RED and TEMP tablespaces to her, also DEFAULT profile, but no quota initially for her and her account should be locked. Both users should get role that will allow them to connect to SQL and individual privilege for creating tables.
+-------------------------------------
+SQL> CREATE USER KATE IDENTIFIED BY KATE
+  2  DEFAULT TABLESPACE RED
+  3  TEMPORARY TABLESPACE TEMP;
+User created.
+
+SQL> ALTER USER KATE ACCOUNT LOCK;
+User altered.
+
+SQL> GRANT CONNECT, CREATE TABLE to PAUL;
+Grant succeeded.
+
+SQL> GRANT CONNECT, CREATE TABLE to KATE;
+Grant succeeded.
+
+
+
+c) Create new profile called MIS so that:
+•	Two sessions per user are allowed
+•	Idle CPU time is no more than half an hour
+•	Two false logins are allowed and that account should remain locked for 5 minutes after the third false login
+-------------------------------------
+SQL> CREATE PROFILE MIS LIMIT
+  2  idle_time 30
+  3  sessions_per_user 2
+  4  failed_login_attempts 2
+  5  password_lock_time 5/1440;
+Profile created.
+
+
+
+d) Assign this profile now to PAUL, then connect to SQL*PLUS as PAUL and try to connect to SQL*PLUS as PAUL again (in a second session). What happened? Then again (in a third session). What happened?
+-------------------------------------
+SQL> ALTER USER PAUL PROFILE MIS;
+User altered.
+
+1st + 2nd attempt
+---
+SQL> conn PAUL/PAUL
+Connected.
+
+3rd:
+---
+SQL> conn PAUL/PAUL
+ERROR:
+ORA-02391: exceeded simultaneous SESSIONS_PER_USER limit
+
+
+
+
+e) As super user SYSTEM modify profile MIS so that only one false login is allowed and that password life time is only 3 months with the grace period of 10 days. Then try to login as PAUL with the wrong password 2 times. Wait only 1 minute and provide now the right password. What happened and how can you rectify this problem  show both methods?
+-------------------------------------
+SQL> ALTER PROFILE MIS LIMIT
+  2  failed_login_attempts 1
+  3  password_life_time 90
+  4  password_grace_time 10;
+Profile altered.
+
+SQL> conn PAUL/wrong
+ERROR:
+ORA-01017: invalid username/password; logon denied
+
+SQL> conn PAUL/wrong
+ERROR:
+ORA-28000: The account is locked.
+
+Right Password:
+---
+SQL> conn PAUL/PAUL
+ERROR:
+ORA-28000: The account is locked.
+
+Rectify 1st Method:
+SQL> conn / as sysdba
+Connected.
+SQL> ALTER USER PAUL ACCOUNT UNLOCK;
+User altered.
+
+Rectify 2nd Method:
+Wait 5 minutes for account to get unlocked.
+
+
+f) As SYSTEM try to create replica of SCOTT’s table EMP in both PAUL’s and KATE’s accounts. Was it successful in both cases? How can you fix this problem? After doing that, verify that KATE (after login) may access her table EMP.
+-------------------------------------
+CREATE TABLE PAUL.emp AS SELECT * FROM SCOTT.emp;
+Table created.
+
+SQL> CREATE TABLE KATE.emp AS SELECT * FROM SCOTT.emp;
+CREATE TABLE KATE.emp AS SELECT * FROM SCOTT.emp
+                                             *
+ERROR at line 1:
+ORA-01950: no privileges on tablespace 'RED'
+
+SQL> ALTER USER KATE ACCOUNT UNLOCK;
+User altered.
+
+SQL> ALTER USER KATE QUOTA 4M ON RED;
+User altered.
+
+SQL> CREATE TABLE KATE.emp AS SELECT * FROM SCOTT.emp;
+Table created.
+
+SQL> CONN KATE/KATE
+Connected.
+
+SQL> SELECT COUNT(*) FROM KATE.emp;
+  COUNT(*)
+----------
+     50000
+
+
+
+g) By joining 2 dictionary views display for users PAUL and KATE their account status, when the account will expire, what profile and tablespaces are assigned and what the  current and maximal byte situation is for these tablespaces?
+-------------------------------------
+
+SELECT USERS.username, USERS.account_status, USERS.expiry_date, USERS.profile, QUOTAS.tablespace_name, QUOTAS.bytes, QUOTAS.max_bytes
+FROM dba_users USERS JOIN dba_ts_quotas QUOTAS ON USERS.username = QUOTAS.username
+WHERE USERS.username IN('PAUL', 'KATE');
+
+USERNAME
+--------------------------------------------------------------------------------
+ACCOUNT_STATUS                   EXPIRY_DA
+-------------------------------- ---------
+PROFILE
+--------------------------------------------------------------------------------
+TABLESPACE_NAME                     BYTES  MAX_BYTES
+------------------------------ ---------- ----------
+KATE
+OPEN                             25-SEP-22
+DEFAULT
+RED                               1843200    4194304
+
+PAUL
+LOCKED(TIMED)                    27-JUN-22
+MIS
+BLUE                              2097152    4194304
+
+PAUL
+LOCKED(TIMED)                    27-JUN-22
+MIS
+INDX                                    0    2097152
+
+
+
+h) Now give individual privilege to PAUL, so that he can DELETE a table in any account and also that he can continue to give this privilege. Then connect as PAUL and give the same privilege to KATE?
+-------------------------------------
+SQL> GRANT DELETE ANY TABLE TO PAUL WITH ADMIN OPTION;
+Grant succeeded.
+
+SQL> CONN PAUL/PAUL
+Connected.
+
+SQL> GRANT DELETE ANY TABLE TO KATE;
+Grant succeeded.
+
+
+
+i) As  SYSTEM, check the appropriate dictionary view and observe only system privileges for those two users (show only relevant columns from this view)
+-------------------------------------
+SQL> SELECT grantee, privilege FROM dba_sys_privs WHERE grantee IN ('PAUL', 'KATE');
+GRANTEE      PRIVILEGE
+------------ -------------------------
+KATE         DELETE ANY TABLE
+KATE         CREATE TABLE
+PAUL         CREATE TABLE
+PAUL         DELETE ANY TABLE
+
+
+
+j) Remove the privilege given to PAUL in h), then connect as KATE and try to REMOVE one row into SCOTT’s table EMP.
+Was it successful and why? Then repeat step i) and explain what is different now?
+-------------------------------------
+SQL> REVOKE DELETE ANY TABLE FROM PAUL;
+Revoke succeeded.
+
+SQL> CONN KATE/KATE
+Connected.
+
+SQL> DELETE FROM scott.emp WHERE ROWNUM = 1;
+1 row deleted.
+
+SQL> SELECT grantee, privilege FROM dba_sys_privs WHERE grantee IN ('PAUL', 'KATE');
+GRANTEE      PRIVILEGE
+------------ -------------------------
+KATE         DELETE ANY TABLE
+KATE         CREATE TABLE
+PAUL         CREATE TABLE
+
+Explanation: Because of cascade, KATE will continue to keep her DELETE privilige.
+Also, if we want Kate to be able to delete a specific row from another user's table, we should grant her select privilege in order to allow her to use the WHERE clause.
+
+
+
+PART #2
+=======================================
+Firstly run the script cr_orders.sql as user PAUL (you will need to adjust this script regarding Tablespace name here)
+
+
+a) Then re-connect as SYSTEM and use a certain JOIN query to check how many extents and blocks has table ORDERS in PAUL’s account and also what is the name of  its corresponding data file.
+-------------------------------------
+SQL> SELECT s.segment_name, s.segment_type,
+            s.extents, s.blocks, d.file_name
+     FROM   dba_segments s, dba_data_files d                                                               
+     WHERE   s.segment_name = 'ORDERS' AND s.owner = 'PAUL' AND s.tablespace_name = d.tablespace_name;
+
+SEGMENT_NAME  EXTENTS BLOCKS FILE_NAME
+------------  ------- ------ ---------
+ORDERS              1      8 /opt/oracle/app/oracle/oradata/DISK4/blue01.dbf
+
+
+
+b) As SYSTEM add a new extent again to the same table with the size of 120K. How many extents and blocks were added? Why? 
+-------------------------------------
+SQL> ALTER TABLE PAUL.orders ALLOCATE EXTENT (SIZE 120k);
+Table altered.
+
+SQL> SELECT s.segment_name, s.tablespace_name,
+            s.extents, s.blocks, d.file_name
+     FROM   dba_segments s, dba_data_files d                                                               
+     WHERE   s.segment_name = 'ORDERS' AND s.owner = 'PAUL' AND s.tablespace_name = d.tablespace_name;
+
+SEGMENT_NAME EXTENTS BLOCKS FILE_NAME
+------------ ------- ------ ---------
+ORDERS             3     24 /opt/oracle/app/oracle/oradata/DISK4/blue01.dbf
+
+Since we're allocating 120K, which is approximately 15 blocks, the system will allocate a full extra extent in order to have all the needed blocks.
+
+
+c) Then perform manual reorganization of this table (like you would do if this table had lots of deleted rows or empty space), but do not change its Tablespace. Perform the query from the previous step. What has changed?
+-------------------------------------
+ALTER TABLE paul.orders ENABLE ROW MOVEMENT;
+Table altered.
+
+ALTER TABLE paul.orders SHRINK SPACE;
+Table altered.
+
+SELECT s.segment_name, s.segment_type,
+            s.extents, s.blocks, d.file_name
+     FROM   dba_segments s, dba_data_files d                                                               
+     WHERE   s.segment_name = 'ORDERS' AND s.owner = 'PAUL' AND s.tablespace_name = d.tablespace_name;
+
+SEGMENT_NAME  EXTENTS BLOCKS FILE_NAME
+------------  ------- ------ ---------
+ORDERS              1      8 /opt/oracle/app/oracle/oradata/DISK4/blue01.dbf
+
+
+d) As PAUL, create a PK constraint for table CUSTOMERS, so that its checking can NOT be delayed (till saving time) in the future. The state should be set to check both existing and incoming data. Also add PK constraint for table ORDERS, so that its checking can be delayed manually (later at some point in time), while its state should be set to check only incoming data. Related indexes should go to Tablespace  INDX. 
+-------------------------------------
+SQL> ALTER TABLE PAUL.customers
+ADD (CONSTRAINT cust_pk PRIMARY KEY(cust_code)
+NOT DEFERRABLE
+USING INDEX TABLESPACE INDX ENABLE VALIDATE);
+
+SQL> ALTER TABLE PAUL.orders
+ADD (CONSTRAINT ord_pk) PRIMARY KEY(ord_id)
+DEFERRABLE INITIALLY IMMEDIATE 
+USING INDEX TABLESPACE INDX ENABLE NOVALIDATE);
+
+
+
+e) Also add an UK constraint on column NAME in table CUSTOMERS, so that will have default value for either its state or mode, and sub-default for the other one. Think hard here. You may want to check question g) below in order to make a right choice. 
+            The related index will also go to tablespace INDX. 
+-------------------------------------
+SQL> ALTER TABLE PAUL.customers
+ADD (CONSTRAINT cust_uk UNIQUE(name)
+NOT DEFERRABLE USING INDEX TABLESPACE INDX
+DISABLE NOVALIDATE);
+
+
+
+f) Create a FK constraint for table ORDERS so that will be promptly enforced at Commit time. This constraint state checks only incoming data.
+-------------------------------------
+SQL> ALTER TABLE PAUL.orders
+ADD (CONSTRAINT ord_fk FOREIGN KEY(cust_code)
+REFERENCES PAUL.customers(cust_code)
+DEFERRABLE INITIALLY IMMEDIATE
+ENABLE NOVALIDATE);
+
+
+g) Then declare a CK constraint with condition that date of delivery may not be later than one month from the order date and also not before it. This constraint's mode is the sub-default one, while the state follows the default value.
+-------------------------------------
+SQL> ALTER TABLE PAUL.orders
+ADD (CONSTRAINT dod_check
+CHECK ((date_of_dely - ord_date <= 30)
+AND (ord_date <= date_of_dely)
+DEFERRABLE INITALLY IMMEDIATE
+ENABLE VALIDATE);
+
+
+h) As SYSTEM, join two most important constraint dictionary views to display the following: constraint name, type, status, validation, can be deferred or not, is it currently deferred, table name and what column(s) are involved for tables CUSTOMERS and ORDERS in PAUL’s account. 
+-------------------------------------
+SELECT CON.constraint_name, CON.constraint_type, CON.status, CON.validated, CON.deferrable, CON.deferred, CON.table_name, COL.column_name
+FROM dba_constraints CON, dba_cons_columns COL
+WHERE CON.constraint_name = COL.constraint_name
+AND CON.table_name IN ('CUSTOMERS', 'ORDERS')
+AND CON.owner = 'PAUL' AND COL.owner = 'PAUL';
+
+CONSTRAINT_NAME
+--------------------------------------------------------------------------------
+C STATUS   VALIDATED     DEFERRABLE     DEFERRED
+- -------- ------------- -------------- ---------
+TABLE_NAME
+--------------------------------------------------------------------------------
+COLUMN_NAME
+--------------------------------------------------------------------------------
+CUST_CODE_PK
+P ENABLED  VALIDATED     DEFERRABLE     IMMEDIATE
+CUSTOMERS
+CUST_CODE
+
+
+CONSTRAINT_NAME
+--------------------------------------------------------------------------------
+C STATUS   VALIDATED     DEFERRABLE     DEFERRED
+- -------- ------------- -------------- ---------
+TABLE_NAME
+--------------------------------------------------------------------------------
+COLUMN_NAME
+--------------------------------------------------------------------------------
+ORDER_ID_PK
+P ENABLED  NOT VALIDATED DEFERRABLE     DEFERRED
+ORDERS
+ORD_ID
+
+
+i) As PAUL, try to make a short DML script (yours and original), that will show how it is possible to insert a child record before its parent record, if the child FK constraint checking is delayed till save time. Manually perform the change that will allow this check delay.
+-------------------------------------
+
+SET CONSTRAINT ord_fk DEFERRED;
+INSERT INTO  orders(ord_id,ord_date,cust_code) VALUES(888,'20-DEC-1997','A09');
+INSERT INTO  customers VALUES('A09','DBA IS FUN','North');
+COMMIT;
+/
+
+SQL> show user
+USER is "PAUL"
+SQL> @dmlscriptpaul.sql
+
+Constraint set.
+
+1 row created.
+
+1 row created.
+
+Commit complete.
+
+Commit complete.
+
+j) Then make another short script that will show how it is possible to enter same names for different customers (three), if the appropriate constraint is turned off at the creation time.
+-------------------------------------
+
+ALTER TABLE customers DISABLE NOVALIDATE CONSTRAINT cust_uk;
+INSERT INTO customers VALUES('A10','iorga','North');
+INSERT INTO customers VALUES('A11','iorga','North');
+INSERT INTO customers VALUES('A12','iorga','North');
+COMMIT;
+/
+
+SQL> show user
+USER is "PAUL"
+SQL> @insertscriptpaul.sql
+
+Table altered.
+
+1 row created.
+
+1 row created.
+
+1 row created.
+
+Commit complete.
+
+Commit complete.
+ 
+k) Now try to set the UK constraint in PAUL’s table CUSTOMERS to the default state. What happened? 
+-------------------------------------
+SQL> ALTER TABLE customers ENABLE VALIDATE CONSTRAINT cust_uk;
+
+Cannot validate because of duplicate keys found.
+
+
+l) Then enable it so that it does NOT check the existing data. If not possible, fix this obstacle by creating a new object in PAUL’s schema. 
+-------------------------------------
+SQL> ALTER TABLE customers ENABLE NOVALIDATE CONSTRAINT cust_uk;
+Table altered.
+
+
+m) Next, try to enter a row with an existing customer name. What happened? 
+-------------------------------------
+SQL> INSERT INTO customers VALUES('A13','iorga','North');
+Error because incoming data is still being checked and violates unique constraint.
+
+
+n) Perform the five step recipe for consolidating the situation with the Name column in PAUL’s CUSTOMERS table (get rid of all customers with duplicate names by modifying duplicates). You should download first the script utlexcpt.sql in order to create the 'container' table (if not done before).
+-------------------------------------
+
+STEP ZERO:
+
+SQL> @utlexcpt;
+
+Table created.
+
+SQL> DESC exceptions;
+ Name                                      Null?    Type
+ ----------------------------------------- -------- ----------------------------
+ ROW_ID                                             ROWID
+ OWNER                                              VARCHAR2(30)
+ TABLE_NAME                                         VARCHAR2(30)
+ CONSTRAINT                                         VARCHAR2(30)
+
+STEP ONE:
+
+SQL> ALTER TABLE customers
+  2  ENABLE CONSTRAINT cust_uk
+  3  EXCEPTIONS INTO exceptions;
+ALTER TABLE customers
+*
+ERROR at line 1:
+ORA-02299: cannot validate (PAUL.CUST_UK) - duplicate keys found
+
+STEP TWO:
+
+SQL> SELECT rowid, cust_code, name
+  2  FROM CUSTOMERS
+  3  WHERE rowid IN (SELECT row_id FROM exceptions WHERE table_name='CUSTOMERS');
+
+ROWID              CUS NAME
+------------------ --- --------------------------------------------------
+AAAT4bAAJAAAACPAAE A05 SHAPE UP
+AAAT4bAAJAAAACPAAF A06 SHAPE UP
+
+STEP THREE:
+
+SQL> ALTER TABLE customers
+  2  DISABLE CONSTRAINT cust_uk;
+
+Table altered.
+
+SQL> ALTER TABLE customers
+  2  ENABLE NOVALIDATE CONSTRAINT cust_uk;
+ALTER TABLE customers
+*
+ERROR at line 1:
+ORA-02299: cannot validate (PAUL.CUST_UK) - duplicate keys found
+
+
+STEP FOUR:
+SQL> UPDATE customers SET NAME='DONT SHAPE UP' WHERE cust_code='A06';
+
+1 row updated.
+
+SQL> commit;
+
+Commit complete.
+
+SQL> select * from customers;
+
+CUS NAME                                               REGIO
+--- -------------------------------------------------- -----
+A01 TKB SPORT SHOP                                     West
+A02 VOLLYRITE                                          North
+A03 JUST TENNIS                                        North
+A04 EVERY MOUNTAIN                                     South
+A05 SHAPE UP                                           South
+A06 DONT SHAPE UP                                      West
+A07 WOMENS SPORTS                                      South
+A08 NORTH WOODS HEALTH AND FITNESS SUPPLY CENTER       East
+A09 DBA IS FUN                                         North
+A10 iorga                                              North
+
+10 rows selected.
+
+
+STEP FIVE:
+SQL> ALTER TABLE customers
+  2  ENABLE CONSTRAINT cust_uk;
+
+Table altered.
+
+STEP SIX(TECHNICALLY FIVE);
+SQL> TRUNCATE TABLE exceptions;
+
+Table truncated.
+
+
+
+
+Three:
+You should create folders BACKUP and ARCHIVE and turn ON archiving here (if you did not do it so far), like shown in Session15. 
+Also, delete in RMAN all previous backup sets (if you have them) by using  syntax DELETE BACKUPSET BS# (like shown in Session15). Then you may start this part.
+
+a) Configure following options in RMAN
+• Number of copies before becoming obsolete is 1
+• Turn off auto backup of Control File
+• Default folder to hold backup sets is  /home/oracle/BACKUP and default name for these sets is hot_%u_%s_%p
+• Exclude JOKE tablespaces from every  backup 
+b)  Perform WHOLE, FULL and COLD database backup. This one may be used later as a base for Incremental backups. Allow only 3 files per set (peace)
+Now show all backup sets created so far
+-------------------------------------
+RMAN> CONFIGURE RETENTION POLICY TO REDUNDANCY 1;
+RMAN> CONFIGURE CONTROLFILE AUTOBACKUP OFF;
+RMAN> CONFIGURE CHANNEL DEVICE TYPE DISK FORMAT '/home/oracle/BACKUP/hot_%u_%s_%p';
+RMAN> CONFIGURE EXCLUDE FOR TABLESPACE JOKE;
+
+
+c) Perform HOT and Incremental-Differential backup of tablespaces MINE and BLUE. Then show all backups of these two tablespaces.
+-------------------------------------
+RMAN> BACKUP INCREMENTAL LEVEL 1 TABLESPACE MINE, BLUE;
+
+Starting backup at 11-APR-22
+allocated channel: ORA_DISK_1
+channel ORA_DISK_1: SID=24 device type=DISK
+channel ORA_DISK_1: starting incremental level 1 datafile backup set
+channel ORA_DISK_1: specifying datafile(s) in backup set
+input datafile file number=00005 name=/opt/oracle/app/oracle/oradata/STUDENT/mine01.dbf
+input datafile file number=00009 name=/opt/oracle/app/oracle/oradata/DISK4/blue01.dbf
+channel ORA_DISK_1: starting piece 1 at 11-APR-22
+channel ORA_DISK_1: finished piece 1 at 11-APR-22
+piece handle=/home/oracle/BACKUP/hot_0a0qn1cd_10_1 tag=TAG20220411T202445 comment=NONE
+channel ORA_DISK_1: backup set complete, elapsed time: 00:00:01
+Finished backup at 11-APR-22
+
+RMAN> LIST BACKUP OF TABLESPACE MINE;
+
+
+List of Backup Sets
+===================
+
+
+BS Key  Type LV Size       Device Type Elapsed Time Completion Time
+------- ---- -- ---------- ----------- ------------ ---------------
+10      Incr 1  3.89M      DISK        00:00:00     11-APR-22
+        BP Key: 10   Status: AVAILABLE  Compressed: NO  Tag: TAG20220411T202445
+        Piece Name: /home/oracle/BACKUP/hot_0a0qn1cd_10_1
+  List of Datafiles in backup set 10
+  File LV Type Ckp SCN    Ckp Time  Abs Fuz SCN Sparse Name
+  ---- -- ---- ---------- --------- ----------- ------ ----
+  5    1  Incr 6410230    11-APR-22              NO    /opt/oracle/app/oracle/oradata/STUDENT/mine01.dbf
+
+
+RMAN> LIST BACKUP OF TABLESPACE BLUE;
+
+
+List of Backup Sets
+===================
+
+
+BS Key  Type LV Size       Device Type Elapsed Time Completion Time
+------- ---- -- ---------- ----------- ------------ ---------------
+10      Incr 1  3.89M      DISK        00:00:00     11-APR-22
+        BP Key: 10   Status: AVAILABLE  Compressed: NO  Tag: TAG20220411T202445
+        Piece Name: /home/oracle/BACKUP/hot_0a0qn1cd_10_1
+  List of Datafiles in backup set 10
+  File LV Type Ckp SCN    Ckp Time  Abs Fuz SCN Sparse Name
+  ---- -- ---- ---------- --------- ----------- ------ ----
+  9    1  Incr 6410230    11-APR-22              NO    /opt/oracle/app/oracle/oradata/DISK4/blue01.dbf
+
+
+
+d) Perform HOT and Incremental-Cumulative backup of datafile that belongs to tablespace RED. Then show all backups of that datafile
+-------------------------------------
+RMAN> REPORT SCHEMA;
+
+Report of database schema for database with db_unique_name STUDENT
+
+List of Permanent Datafiles
+===========================
+File Size(MB) Tablespace           RB segs Datafile Name
+---- -------- -------------------- ------- ------------------------
+1    930      SYSTEM               YES     /opt/oracle/app/oracle/oradata/STUDENT/system01.dbf
+2    15       JOKE                 NO      /opt/oracle/app/oracle/oradata/STUDENT/joke01.dbf
+3    1260     SYSAUX               NO      /opt/oracle/app/oracle/oradata/STUDENT/sysaux01.dbf
+4    105      UNDOTBS1             YES     /opt/oracle/app/oracle/oradata/STUDENT/undotbs01.dbf
+5    10       MINE                 NO      /opt/oracle/app/oracle/oradata/STUDENT/mine01.dbf
+7    7        USERS                NO      /opt/oracle/app/oracle/oradata/STUDENT/users01.dbf
+8    3        JOKE                 NO      /opt/oracle/app/oracle/oradata/DISK4/joke02.dbf
+9    10       BLUE                 NO      /opt/oracle/app/oracle/oradata/DISK4/blue01.dbf
+10   5        RED                  NO      /opt/oracle/app/oracle/oradata/DISK2/red01.dbf
+11   2        RED                  NO      /opt/oracle/app/oracle/oradata/DISK4/red02.dbf
+12   40       YORK                 NO      /opt/oracle/app/oracle/oradata/DISK4/york01.dbf
+13   20       YORK                 NO      /opt/oracle/app/oracle/oradata/DISK4/york02.dbf
+14   10       INDX                 NO      /opt/oracle/app/oracle/oradata/DISK2/indx01.dbf
+
+List of Temporary Files
+=======================
+File Size(MB) Tablespace           Maxsize(MB) Tempfile Name
+---- -------- -------------------- ----------- --------------------
+1    131      TEMP                 32767       /opt/oracle/app/oracle/oradata/STUDENT/temp01.dbf
+2    20       MYTEMP               40          /opt/oracle/app/oracle/oradata/DISK3/mytem01.dbf
+3    10       MYTEMP               32767       /opt/oracle/app/oracle/oradata/DISK3/mytemp02.dbf
+
+RMAN> BACKUP INCREMENTAL LEVEL 1 CUMULATIVE DATAFILE 12, 13;
+
+Starting backup at 11-APR-22
+using channel ORA_DISK_1
+channel ORA_DISK_1: starting incremental level 1 datafile backup set
+channel ORA_DISK_1: specifying datafile(s) in backup set
+input datafile file number=00012 name=/opt/oracle/app/oracle/oradata/DISK4/york01.dbf
+input datafile file number=00013 name=/opt/oracle/app/oracle/oradata/DISK4/york02.dbf
+channel ORA_DISK_1: starting piece 1 at 11-APR-22
+channel ORA_DISK_1: finished piece 1 at 11-APR-22
+piece handle=/home/oracle/BACKUP/hot_0b0qn1f7_11_1 tag=TAG20220411T202615 comment=NONE
+channel ORA_DISK_1: backup set complete, elapsed time: 00:00:01
+Finished backup at 11-APR-22
+
+RMAN> list backup of datafile 12,13;
+
+
+List of Backup Sets
+===================
+
+
+BS Key  Type LV Size       Device Type Elapsed Time Completion Time
+------- ---- -- ---------- ----------- ------------ ---------------
+11      Incr 1  160.00K    DISK        00:00:00     11-APR-22
+        BP Key: 11   Status: AVAILABLE  Compressed: NO  Tag: TAG20220411T202615
+        Piece Name: /home/oracle/BACKUP/hot_0b0qn1f7_11_1
+  List of Datafiles in backup set 11
+  File LV Type Ckp SCN    Ckp Time  Abs Fuz SCN Sparse Name
+  ---- -- ---- ---------- --------- ----------- ------ ----
+  12   1  Incr 6410525    11-APR-22              NO    /opt/oracle/app/oracle/oradata/DISK4/york01.dbf
+  13   1  Incr 6410525    11-APR-22              NO    /opt/oracle/app/oracle/oradata/DISK4/york02.dbf
+
+
+
+
+e) Display all files that are due for backup regarding retention policy established in a)  
+-------------------------------------
+RMAN> REPORT NEED BACKUP;
+
+RMAN retention policy will be applied to the command
+RMAN retention policy is set to redundancy 1
+Report of files with less than 1 redundant backups
+File #bkps Name
+---- ----- -----------------------------------------------------
+1    0     /opt/oracle/app/oracle/oradata/STUDENT/system01.dbf
+file 2 is excluded from whole database backup
+3    0     /opt/oracle/app/oracle/oradata/STUDENT/sysaux01.dbf
+4    0     /opt/oracle/app/oracle/oradata/STUDENT/undotbs01.dbf
+7    0     /opt/oracle/app/oracle/oradata/STUDENT/users01.dbf
+file 8 is excluded from whole database backup
+10   0     /opt/oracle/app/oracle/oradata/DISK2/red01.dbf
+11   0     /opt/oracle/app/oracle/oradata/DISK4/red02.dbf
+14   0     /opt/oracle/app/oracle/oradata/DISK2/indx01.dbf
+
+
+
+f) Perform  HOT and Incremental-Cumulative backup of the database
+-------------------------------------
+RMAN> BACKUP INCREMENTAL LEVEL 1 CUMULATIVE DATABASE PLUS ARCHIVELOG;
+
+Starting backup at 11-APR-22
+current log archived
+using channel ORA_DISK_1
+channel ORA_DISK_1: starting archived log backup set
+channel ORA_DISK_1: specifying archived log(s) in backup set
+input archived log thread=1 sequence=64 RECID=1 STAMP=1101575821
+input archived log thread=1 sequence=65 RECID=2 STAMP=1101604924
+input archived log thread=1 sequence=66 RECID=3 STAMP=1101663460
+input archived log thread=1 sequence=67 RECID=4 STAMP=1101747644
+input archived log thread=1 sequence=68 RECID=5 STAMP=1101760078
+channel ORA_DISK_1: starting piece 1 at 11-APR-22
+channel ORA_DISK_1: finished piece 1 at 11-APR-22
+piece handle=/home/oracle/BACKUP/hot_0c0qn1if_12_1 tag=TAG20220411T202758 comment=NONE
+channel ORA_DISK_1: backup set complete, elapsed time: 00:00:03
+Finished backup at 11-APR-22
+
+Starting backup at 11-APR-22
+using channel ORA_DISK_1
+file 2 is excluded from whole database backup
+file 8 is excluded from whole database backup
+no parent backup or copy of datafile 3 found
+no parent backup or copy of datafile 1 found
+no parent backup or copy of datafile 4 found
+no parent backup or copy of datafile 7 found
+channel ORA_DISK_1: starting incremental level 0 datafile backup set
+channel ORA_DISK_1: specifying datafile(s) in backup set
+input datafile file number=00003 name=/opt/oracle/app/oracle/oradata/STUDENT/sysaux01.dbf
+input datafile file number=00001 name=/opt/oracle/app/oracle/oradata/STUDENT/system01.dbf
+input datafile file number=00004 name=/opt/oracle/app/oracle/oradata/STUDENT/undotbs01.dbf
+input datafile file number=00007 name=/opt/oracle/app/oracle/oradata/STUDENT/users01.dbf
+channel ORA_DISK_1: starting piece 1 at 11-APR-22
+channel ORA_DISK_1: finished piece 1 at 11-APR-22
+piece handle=/home/oracle/BACKUP/hot_0d0qn1ii_13_1 tag=TAG20220411T202802 comment=NONE
+channel ORA_DISK_1: backup set complete, elapsed time: 00:00:15
+channel ORA_DISK_1: starting incremental level 1 datafile backup set
+channel ORA_DISK_1: specifying datafile(s) in backup set
+input datafile file number=00012 name=/opt/oracle/app/oracle/oradata/DISK4/york01.dbf
+input datafile file number=00013 name=/opt/oracle/app/oracle/oradata/DISK4/york02.dbf
+input datafile file number=00005 name=/opt/oracle/app/oracle/oradata/STUDENT/mine01.dbf
+input datafile file number=00009 name=/opt/oracle/app/oracle/oradata/DISK4/blue01.dbf
+input datafile file number=00014 name=/opt/oracle/app/oracle/oradata/DISK2/indx01.dbf
+input datafile file number=00010 name=/opt/oracle/app/oracle/oradata/DISK2/red01.dbf
+input datafile file number=00011 name=/opt/oracle/app/oracle/oradata/DISK4/red02.dbf
+channel ORA_DISK_1: starting piece 1 at 11-APR-22
+channel ORA_DISK_1: finished piece 1 at 11-APR-22
+piece handle=/home/oracle/BACKUP/hot_0e0qn1j1_14_1 tag=TAG20220411T202802 comment=NONE
+channel ORA_DISK_1: backup set complete, elapsed time: 00:00:01
+channel ORA_DISK_1: starting incremental level 1 datafile backup set
+channel ORA_DISK_1: specifying datafile(s) in backup set
+including current control file in backup set
+including current SPFILE in backup set
+channel ORA_DISK_1: starting piece 1 at 11-APR-22
+channel ORA_DISK_1: finished piece 1 at 11-APR-22
+piece handle=/home/oracle/BACKUP/hot_0f0qn1j2_15_1 tag=TAG20220411T202802 comment=NONE
+channel ORA_DISK_1: backup set complete, elapsed time: 00:00:01
+Finished backup at 11-APR-22
+
+Starting backup at 11-APR-22
+current log archived
+using channel ORA_DISK_1
+channel ORA_DISK_1: starting archived log backup set
+channel ORA_DISK_1: specifying archived log(s) in backup set
+input archived log thread=1 sequence=69 RECID=6 STAMP=1101760100
+channel ORA_DISK_1: starting piece 1 at 11-APR-22
+channel ORA_DISK_1: finished piece 1 at 11-APR-22
+piece handle=/home/oracle/BACKUP/hot_0g0qn1j5_16_1 tag=TAG20220411T202821 comment=NONE
+channel ORA_DISK_1: backup set complete, elapsed time: 00:00:01
+Finished backup at 11-APR-22
+
+
+g) Display all backup sets that are beyond retention policy established in a).  Then delete all these sets.
+-------------------------------------
+RMAN> REPORT OBSOLETE;
+
+RMAN retention policy will be applied to the command
+RMAN retention policy is set to redundancy 1
+Report of obsolete backups and copies
+Type                 Key    Completion Time    Filename/Handle
+-------------------- ------ ------------------ --------------------
+Archive Log          1      09-APR-22          /opt/oracle/app/oracle/recovery_area/STUDENT/archivelog/2022_04_09/o1_mf_1_64_k53xydoc_.arc
+Archive Log          2      10-APR-22          /opt/oracle/app/oracle/recovery_area/STUDENT/archivelog/2022_04_10/o1_mf_1_65_k54tcvo0_.arc
+Archive Log          3      10-APR-22          /opt/oracle/app/oracle/recovery_area/STUDENT/archivelog/2022_04_10/o1_mf_1_66_k56mk444_.arc
+Archive Log          4      11-APR-22          /opt/oracle/app/oracle/recovery_area/STUDENT/archivelog/2022_04_11/o1_mf_1_67_k595qvq7_.arc
+
+RMAN> DELETE OBSOLETE;
+
+RMAN retention policy will be applied to the command
+RMAN retention policy is set to redundancy 1
+using channel ORA_DISK_1
+Deleting the following obsolete backups and copies:
+Type                 Key    Completion Time    Filename/Handle
+-------------------- ------ ------------------ --------------------
+Archive Log          1      09-APR-22          /opt/oracle/app/oracle/recovery_area/STUDENT/archivelog/2022_04_09/o1_mf_1_64_k53xydoc_.arc
+Archive Log          2      10-APR-22          /opt/oracle/app/oracle/recovery_area/STUDENT/archivelog/2022_04_10/o1_mf_1_65_k54tcvo0_.arc
+Archive Log          3      10-APR-22          /opt/oracle/app/oracle/recovery_area/STUDENT/archivelog/2022_04_10/o1_mf_1_66_k56mk444_.arc
+Archive Log          4      11-APR-22          /opt/oracle/app/oracle/recovery_area/STUDENT/archivelog/2022_04_11/o1_mf_1_67_k595qvq7_.arc
+
+Do you really want to delete the above objects (enter YES or NO)? y
+deleted archived log
+archived log file name=/opt/oracle/app/oracle/recovery_area/STUDENT/archivelog/2022_04_09/o1_mf_1_64_k53xydoc_.arc RECID=1 STAMP=1101575821
+deleted archived log
+archived log file name=/opt/oracle/app/oracle/recovery_area/STUDENT/archivelog/2022_04_10/o1_mf_1_65_k54tcvo0_.arc RECID=2 STAMP=1101604924
+deleted archived log
+archived log file name=/opt/oracle/app/oracle/recovery_area/STUDENT/archivelog/2022_04_10/o1_mf_1_66_k56mk444_.arc RECID=3 STAMP=1101663460
+deleted archived log
+archived log file name=/opt/oracle/app/oracle/recovery_area/STUDENT/archivelog/2022_04_11/o1_mf_1_67_k595qvq7_.arc RECID=4 STAMP=1101747644
+Deleted 4 objects
+
+
+
+h) Now show all backup sets remained. Also, show the content of /home/oracle/BACKUP folder
+-------------------------------------
+RMAN> list backup;
+
+List of Backup Sets
+===================
+
+
+BS Key  Type LV Size       Device Type Elapsed Time Completion Time
+------- ---- -- ---------- ----------- ------------ ---------------
+10      Incr 1  3.89M      DISK        00:00:00     11-APR-22
+        BP Key: 10   Status: AVAILABLE  Compressed: NO  Tag: TAG20220411T202445
+        Piece Name: /home/oracle/BACKUP/hot_0a0qn1cd_10_1
+  List of Datafiles in backup set 10
+  File LV Type Ckp SCN    Ckp Time  Abs Fuz SCN Sparse Name
+  ---- -- ---- ---------- --------- ----------- ------ ----
+  5    1  Incr 6410230    11-APR-22              NO    /opt/oracle/app/oracle/oradata/STUDENT/mine01.dbf
+  9    1  Incr 6410230    11-APR-22              NO    /opt/oracle/app/oracle/oradata/DISK4/blue01.dbf
+
+BS Key  Type LV Size       Device Type Elapsed Time Completion Time
+------- ---- -- ---------- ----------- ------------ ---------------
+11      Incr 1  160.00K    DISK        00:00:00     11-APR-22
+        BP Key: 11   Status: AVAILABLE  Compressed: NO  Tag: TAG20220411T202615
+        Piece Name: /home/oracle/BACKUP/hot_0b0qn1f7_11_1
+  List of Datafiles in backup set 11
+  File LV Type Ckp SCN    Ckp Time  Abs Fuz SCN Sparse Name
+  ---- -- ---- ---------- --------- ----------- ------ ----
+  12   1  Incr 6410525    11-APR-22              NO    /opt/oracle/app/oracle/oradata/DISK4/york01.dbf
+  13   1  Incr 6410525    11-APR-22              NO    /opt/oracle/app/oracle/oradata/DISK4/york02.dbf
+
+BS Key  Size       Device Type Elapsed Time Completion Time
+------- ---------- ----------- ------------ ---------------
+12      710.71M    DISK        00:00:01     11-APR-22
+        BP Key: 12   Status: AVAILABLE  Compressed: NO  Tag: TAG20220411T202758
+        Piece Name: /home/oracle/BACKUP/hot_0c0qn1if_12_1
+
+  List of Archived Logs in backup set 12
+  Thrd Seq     Low SCN    Low Time  Next SCN   Next Time
+  ---- ------- ---------- --------- ---------- ---------
+  1    64      6125059    07-APR-22 6205606    09-APR-22
+  1    65      6205606    09-APR-22 6263603    10-APR-22
+  1    66      6263603    10-APR-22 6323153    10-APR-22
+  1    67      6323153    10-APR-22 6401665    11-APR-22
+  1    68      6401665    11-APR-22 6410617    11-APR-22
+
+BS Key  Type LV Size       Device Type Elapsed Time Completion Time
+------- ---- -- ---------- ----------- ------------ ---------------
+13      Incr 0  1.84G      DISK        00:00:12     11-APR-22
+        BP Key: 13   Status: AVAILABLE  Compressed: NO  Tag: TAG20220411T202802
+        Piece Name: /home/oracle/BACKUP/hot_0d0qn1ii_13_1
+  List of Datafiles in backup set 13
+  File LV Type Ckp SCN    Ckp Time  Abs Fuz SCN Sparse Name
+  ---- -- ---- ---------- --------- ----------- ------ ----
+  1    0  Incr 6410630    11-APR-22              NO    /opt/oracle/app/oracle/oradata/STUDENT/system01.dbf
+  3    0  Incr 6410630    11-APR-22              NO    /opt/oracle/app/oracle/oradata/STUDENT/sysaux01.dbf
+  4    0  Incr 6410630    11-APR-22              NO    /opt/oracle/app/oracle/oradata/STUDENT/undotbs01.dbf
+  7    0  Incr 6410630    11-APR-22              NO    /opt/oracle/app/oracle/oradata/STUDENT/users01.dbf
+
+BS Key  Type LV Size       Device Type Elapsed Time Completion Time
+------- ---- -- ---------- ----------- ------------ ---------------
+14      Incr 1  1.45M      DISK        00:00:00     11-APR-22
+        BP Key: 14   Status: AVAILABLE  Compressed: NO  Tag: TAG20220411T202802
+        Piece Name: /home/oracle/BACKUP/hot_0e0qn1j1_14_1
+  List of Datafiles in backup set 14
+  File LV Type Ckp SCN    Ckp Time  Abs Fuz SCN Sparse Name
+  ---- -- ---- ---------- --------- ----------- ------ ----
+  5    1  Incr 6410636    11-APR-22              NO    /opt/oracle/app/oracle/oradata/STUDENT/mine01.dbf
+  9    1  Incr 6410636    11-APR-22              NO    /opt/oracle/app/oracle/oradata/DISK4/blue01.dbf
+  10   1  Incr 6410636    11-APR-22              NO    /opt/oracle/app/oracle/oradata/DISK2/red01.dbf
+  11   1  Incr 6410636    11-APR-22              NO    /opt/oracle/app/oracle/oradata/DISK4/red02.dbf
+  12   1  Incr 6410636    11-APR-22              NO    /opt/oracle/app/oracle/oradata/DISK4/york01.dbf
+  13   1  Incr 6410636    11-APR-22              NO    /opt/oracle/app/oracle/oradata/DISK4/york02.dbf
+  14   1  Incr 6410636    11-APR-22              NO    /opt/oracle/app/oracle/oradata/DISK2/indx01.dbf
+
+BS Key  Type LV Size       Device Type Elapsed Time Completion Time
+------- ---- -- ---------- ----------- ------------ ---------------
+15      Incr 1  10.20M     DISK        00:00:01     11-APR-22
+        BP Key: 15   Status: AVAILABLE  Compressed: NO  Tag: TAG20220411T202802
+        Piece Name: /home/oracle/BACKUP/hot_0f0qn1j2_15_1
+  SPFILE Included: Modification time: 11-APR-22
+  SPFILE db_unique_name: STUDENT
+  Control File Included: Ckp SCN: 6410636      Ckp time: 11-APR-22
+
+BS Key  Size       Device Type Elapsed Time Completion Time
+------- ---------- ----------- ------------ ---------------
+16      9.50K      DISK        00:00:00     11-APR-22
+        BP Key: 16   Status: AVAILABLE  Compressed: NO  Tag: TAG20220411T202821
+        Piece Name: /home/oracle/BACKUP/hot_0g0qn1j5_16_1
+
+  List of Archived Logs in backup set 16
+  Thrd Seq     Low SCN    Low Time  Next SCN   Next Time
+  ---- ------- ---------- --------- ---------- ---------
+  1    69      6410617    11-APR-22 6410643    11-APR-22
+
+RMAN> host;
+
+[oracle@oracledb19c ~]$ ls -l BACKUP
+total 2673544
+-rw-r----- 1 oracle dba    4087808 Apr 11 20:24 hot_0a0qn1cd_10_1
+-rw-r----- 1 oracle dba     172032 Apr 11 20:26 hot_0b0qn1f7_11_1
+-rw-r----- 1 oracle dba  745229312 Apr 11 20:28 hot_0c0qn1if_12_1
+-rw-r----- 1 oracle dba 1975959552 Apr 11 20:28 hot_0d0qn1ii_13_1
+-rw-r----- 1 oracle dba    1531904 Apr 11 20:28 hot_0e0qn1j1_14_1
+-rw-r----- 1 oracle dba   10715136 Apr 11 20:28 hot_0f0qn1j2_15_1
+-rw-r----- 1 oracle dba      10240 Apr 11 20:28 hot_0g0qn1j5_16_1
+
